@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notification Control Center</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Supabase JS Client with defer -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex items-center justify-center p-4">
+
+    <div class="w-full max-w-lg bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+        
+        <!-- Header -->
+        <div class="bg-slate-950 p-6 border-b border-slate-700">
+            <h1 class="text-xl font-bold text-white flex items-center gap-2">
+                <span>🔔</span> Notification Dispatcher
+            </h1>
+            <p class="text-xs text-slate-400 mt-1">Send immediate alerts or schedule future notifications to target Windows PCs.</p>
+        </div>
+
+        <!-- Tab Toggle Buttons -->
+        <div class="flex border-b border-slate-700 bg-slate-850">
+            <button id="tab-instant" type="button" onclick="switchTab('instant')" class="w-1/2 py-3 text-sm font-semibold text-sky-400 border-b-2 border-sky-400 bg-slate-800/50 transition-all">
+                ⚡ Instant Alert
+            </button>
+            <button id="tab-scheduled" type="button" onclick="switchTab('scheduled')" class="w-1/2 py-3 text-sm font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-all">
+                ⏰ Scheduled Alert
+            </button>
+        </div>
+
+        <!-- Form Body -->
+        <form id="notify-form" class="p-6 space-y-4">
+            
+            <!-- Title Field -->
+            <div>
+                <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Notification Title</label>
+                <input type="text" id="title" required placeholder="e.g., Critical Server Alert" 
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-500">
+            </div>
+
+            <!-- Message Field -->
+            <div>
+                <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Message Body</label>
+                <textarea id="message" rows="3" required placeholder="Enter the notification message contents..." 
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-500"></textarea>
+            </div>
+
+            <!-- Instant Fields -->
+            <div id="section-type">
+                <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Alert Type & Icon</label>
+                <select id="type" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-500">
+                    <option value="info">ℹ️ Info (Blue System Shield)</option>
+                    <option value="warning">⚠ Warning / Critical (Red Warning Badge)</option>
+                    <option value="user">👤 User Account Alert</option>
+                </select>
+            </div>
+
+            <!-- Scheduled Fields -->
+            <div id="section-schedule" class="hidden">
+                <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Trigger Date & Time (Local)</label>
+                <input type="datetime-local" id="notify_at" 
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-500">
+            </div>
+
+            <!-- Status Banner -->
+            <div id="status-banner" class="hidden text-xs p-3 rounded-lg border"></div>
+
+            <!-- Submit Button -->
+            <button type="submit" id="submit-btn" class="w-full bg-sky-600 hover:bg-sky-500 text-white font-medium py-2.5 rounded-lg text-sm transition-all shadow-md active:scale-95">
+                Send Instant Notification
+            </button>
+
+        </form>
+    </div>
+
+    <script>
+        // --- SUPABASE CREDENTIALS ---
+        const SUPABASE_URL = "https://cqogelczjlrvydizytuj.supabase.co";
+        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNxb2dlbGN6amxydnlkaXp5dHVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA5NDQ1MzgsImV4cCI6MjEwNjUyMDUzOH0.FuhyonofD2U--mA0Re7jnQRLM5c7UDRMtrDMY1tPsZM";
+
+        let activeTab = 'instant';
+        let db = null;
+
+        function initSupabase() {
+            if (window.supabase) {
+                db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                return true;
+            }
+            return false;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!initSupabase()) {
+                let attempts = 0;
+                const interval = setInterval(() => {
+                    attempts++;
+                    if (initSupabase()) {
+                        clearInterval(interval);
+                    } else if (attempts > 50) {
+                        clearInterval(interval);
+                        showStatus("Failed to load Supabase SDK from CDN. Check internet connection.", "error");
+                    }
+                }, 100);
+            }
+
+            const form = document.getElementById('notify-form');
+            if (form) {
+                form.addEventListener('submit', handleSubmit);
+            }
+        });
+
+        function switchTab(tab) {
+            activeTab = tab;
+            const instantTabBtn = document.getElementById('tab-instant');
+            const scheduledTabBtn = document.getElementById('tab-scheduled');
+            const typeSection = document.getElementById('section-type');
+            const scheduleSection = document.getElementById('section-schedule');
+            const submitBtn = document.getElementById('submit-btn');
+
+            if (tab === 'instant') {
+                instantTabBtn.className = "w-1/2 py-3 text-sm font-semibold text-sky-400 border-b-2 border-sky-400 bg-slate-800/50 transition-all";
+                scheduledTabBtn.className = "w-1/2 py-3 text-sm font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-all";
+                typeSection.classList.remove('hidden');
+                scheduleSection.classList.add('hidden');
+                submitBtn.innerText = "Send Instant Notification";
+            } else {
+                scheduledTabBtn.className = "w-1/2 py-3 text-sm font-semibold text-sky-400 border-b-2 border-sky-400 bg-slate-800/50 transition-all";
+                instantTabBtn.className = "w-1/2 py-3 text-sm font-semibold text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition-all";
+                typeSection.classList.add('hidden');
+                scheduleSection.classList.remove('hidden');
+                submitBtn.innerText = "Schedule Notification";
+            }
+        }
+
+        async function handleSubmit(event) {
+            event.preventDefault();
+            const banner = document.getElementById('status-banner');
+            const btn = document.getElementById('submit-btn');
+            
+            btn.disabled = true;
+            btn.innerText = "Dispatching...";
+            banner.className = "hidden";
+
+            const title = document.getElementById('title').value;
+            const message = document.getElementById('message').value;
+
+            try {
+                if (!db && !initSupabase()) {
+                    throw new Error("Supabase SDK did not load. Please refresh the page.");
+                }
+
+                if (activeTab === 'instant') {
+                    const type = document.getElementById('type').value;
+                    const { error } = await db.from('instant_notifications').insert([
+                        { title: title, message: message, type: type, is_processed: false }
+                    ]);
+                    if (error) throw error;
+                    showStatus("Instant notification sent to queue!", "success");
+                } else {
+                    const notifyAtInput = document.getElementById('notify_at').value;
+                    if (!notifyAtInput) throw new Error("Please select a future date and time.");
+                    
+                    const notifyAtUTC = new Date(notifyAtInput).toISOString();
+
+                    const { error } = await db.from('scheduled_notifications').insert([
+                        { title: title, message: message, notify_at: notifyAtUTC, is_notified: false }
+                    ]);
+                    if (error) throw error;
+                    showStatus("Scheduled notification created successfully!", "success");
+                }
+
+                document.getElementById('notify-form').reset();
+            } catch (err) {
+                showStatus(err.message || "Failed to dispatch notification.", "error");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = activeTab === 'instant' ? "Send Instant Notification" : "Schedule Notification";
+            }
+        }
+
+        function showStatus(msg, statusType) {
+            const banner = document.getElementById('status-banner');
+            banner.classList.remove('hidden');
+            if (statusType === 'success') {
+                banner.className = "text-xs p-3 rounded-lg border bg-emerald-950/50 border-emerald-700 text-emerald-300";
+                banner.innerText = `✅ ${msg}`;
+            } else {
+                banner.className = "text-xs p-3 rounded-lg border bg-rose-950/50 border-rose-700 text-rose-300";
+                banner.innerText = `❌ ${msg}`;
+            }
+        }
+    </script>
+</body>
+</html>
